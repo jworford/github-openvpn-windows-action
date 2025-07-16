@@ -88,3 +88,80 @@ runs:
         
         Write-Host "OpenVPN connection setup complete"
       shell: powershell
+
+    - name: Cleanup OpenVPN (Always runs)
+      shell: powershell
+      if: always()
+      run: |
+        $ErrorActionPreference = "Continue"
+        
+        Write-Host "Starting OpenVPN cleanup..."
+        
+        # Try to get process ID from environment
+        $processId = $env:OPENVPN_PROCESS_ID
+        
+        if ($processId) {
+          Write-Host "Found stored OpenVPN process ID: $processId"
+          
+          try {
+            # Check if process is still running
+            $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+            
+            if ($process) {
+              Write-Host "Terminating OpenVPN process (PID: $processId)..."
+              Stop-Process -Id $processId -Force
+              
+              # Wait a moment and verify termination
+              Start-Sleep -Seconds 2
+              $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+              
+              if (-not $process) {
+                Write-Host "OpenVPN process terminated successfully"
+              } else {
+                Write-Host "OpenVPN process may still be running"
+              }
+            } else {
+              Write-Host "OpenVPN process already terminated"
+            }
+          } catch {
+            Write-Host "Error during process termination: $($_.Exception.Message)"
+          }
+        } else {
+          Write-Host "No stored process ID found, attempting to find OpenVPN processes..."
+          
+          # Fallback: Find and terminate any OpenVPN processes
+          $openvpnProcesses = Get-Process -Name "openvpn" -ErrorAction SilentlyContinue
+          
+          if ($openvpnProcesses) {
+            Write-Host "Found $($openvpnProcesses.Count) OpenVPN process(es)"
+            
+            foreach ($proc in $openvpnProcesses) {
+              Write-Host "Terminating OpenVPN process (PID: $($proc.Id))..."
+              try {
+                Stop-Process -Id $proc.Id -Force
+                Write-Host "Process $($proc.Id) terminated"
+              } catch {
+                Write-Host "Failed to terminate process $($proc.Id): $($_.Exception.Message)"
+              }
+            }
+          } else {
+            Write-Host "No OpenVPN processes found"
+          }
+        }
+        
+        # Clean up temporary files
+        Write-Host "Cleaning up temporary files..."
+        
+        $filesToClean = @("client.ovpn", "auth.txt", "openvpn.log")
+        foreach ($file in $filesToClean) {
+          if (Test-Path $file) {
+            try {
+              Remove-Item $file -Force
+              Write-Host "Removed $file"
+            } catch {
+              Write-Host "Failed to remove $file: $($_.Exception.Message)"
+            }
+          }
+        }
+        
+        Write-Host "OpenVPN cleanup complete"
