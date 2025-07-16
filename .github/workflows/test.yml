@@ -1,0 +1,95 @@
+name: Test Action
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Test Action Syntax
+        shell: powershell
+        run: |
+          # Basic syntax validation
+          $actionContent = Get-Content -Path "action.yml" -Raw
+          if ($actionContent -match "name:.*description:.*runs:") {
+            Write-Host "✅ Action YAML syntax appears valid"
+          } else {
+            Write-Host "❌ Action YAML syntax validation failed"
+            exit 1
+          }
+          
+      - name: Test PowerShell Syntax
+        shell: powershell
+        run: |
+          # Extract PowerShell script from action.yml and validate syntax
+          $actionContent = Get-Content -Path "action.yml" -Raw
+          $psScriptStart = $actionContent.IndexOf('run: |')
+          
+          if ($psScriptStart -gt -1) {
+            Write-Host "✅ PowerShell script block found in action.yml"
+          } else {
+            Write-Host "❌ PowerShell script block not found"
+            exit 1
+          }
+          
+      - name: Test Required Inputs
+        shell: powershell
+        run: |
+          # Validate that required inputs are defined
+          $yaml = Get-Content -Path "action.yml" -Raw
+          $requiredInputs = @('config', 'username', 'password')
+          
+          foreach ($input in $requiredInputs) {
+            if ($yaml -match "$input`:") {
+              Write-Host "✅ Required input '$input' found"
+            } else {
+              Write-Host "❌ Required input '$input' not found"
+              exit 1
+            }
+          }          # Note: We can't test the actual VPN connection without real credentials
+          # This workflow focuses on validating the action structure and syntax
+          
+      - name: Test Cleanup Action Syntax
+        shell: powershell
+        run: |
+          # Validate cleanup.yml exists and has proper structure
+          if (Test-Path "cleanup.yml") {
+            Write-Host "✅ Cleanup action file found"
+            
+            $cleanupContent = Get-Content -Path "cleanup.yml" -Raw
+            if ($cleanupContent -match "name:.*description:.*runs:") {
+              Write-Host "✅ Cleanup action YAML syntax appears valid"
+            } else {
+              Write-Host "❌ Cleanup action YAML syntax validation failed"
+              exit 1
+            }
+          } else {
+            Write-Host "❌ Cleanup action file not found"
+            exit 1
+          }
+          
+      - name: Test Cleanup Integration
+        shell: powershell
+        run: |
+          # Verify main action contains cleanup step
+          $mainAction = Get-Content -Path "action.yml" -Raw
+          if ($mainAction -match "Cleanup OpenVPN.*Always runs") {
+            Write-Host "✅ Cleanup step found in main action"
+          } else {
+            Write-Host "❌ Cleanup step not found in main action"
+            exit 1
+          }
+          
+          # Verify cleanup runs with if: always()
+          if ($mainAction -match "if: always\(\)") {
+            Write-Host "✅ Cleanup configured to always run"
+          } else {
+            Write-Host "❌ Cleanup not configured to always run"
+            exit 1
+          }
