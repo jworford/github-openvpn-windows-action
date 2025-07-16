@@ -45,6 +45,7 @@ runs:
         # Install OpenVPN using Chocolatey
         Write-Host "📦 Installing OpenVPN using Chocolatey..."
         $chocoResult = Start-Process choco -ArgumentList "install", "openvpn", "-y", "--no-progress" -Wait -PassThru -NoNewWindow
+        Write-Host "Chocolatey installation exit code: $($chocoResult.ExitCode)"
         
         if ($chocoResult.ExitCode -ne 0) {
           Write-Host "❌ ERROR: Chocolatey installation failed"
@@ -60,6 +61,8 @@ runs:
           exit 1
         }
         
+        Write-Host "Found OpenVPN at: $openvpnPath"
+        
         # Create auth file with username and password
         $auth = @"
         ${{ inputs.username }}
@@ -69,63 +72,18 @@ runs:
         Write-Host "✓ Authentication file created"
         
         # Start OpenVPN connection
-        Write-Host "🚀 Starting OpenVPN connection..."
+        Write-Host "🚀 Starting OpenVPN connection using: $openvpnPath"
         $process = Start-Process -FilePath $openvpnPath -ArgumentList "--config", "client.ovpn", "--auth-user-pass", "auth.txt", "--log", "openvpn.log" -PassThru -NoNewWindow
         
-        # Store process ID for cleanup
-        $processId = $process.Id
-        Write-Host "📋 OpenVPN process ID: $processId"
-        
-        # Store process ID in environment variable for cleanup
-        echo "OPENVPN_PROCESS_ID=$processId" >> $env:GITHUB_ENV
-        
         # Wait for connection to establish
-        $timeout = [int]'${{ inputs.connection-timeout }}'
-        Write-Host "⏳ Waiting $timeout seconds for VPN connection to establish..."
-        Start-Sleep -Seconds $timeout
+        Start-Sleep -Seconds 45
         
-        # Verify process is running
-        if (-not $process -or $process.HasExited) {
+        # Check if process is still running
+        if ($process -and !$process.HasExited) {
+          Write-Host "✓ OpenVPN process is running"
+        } else {
           Write-Host "❌ ERROR: OpenVPN process failed to start or exited unexpectedly"
           exit 1
-        }
-        
-        Write-Host "✓ OpenVPN process is running (PID: $processId)"
-        
-        # Test connection if specified
-        $testConnection = '${{ inputs.test-connection }}'
-        if ($testConnection) {
-          $parts = $testConnection.Split(':')
-          if ($parts.Length -eq 2) {
-            $testHost = $parts[0]
-            $testPort = [int]$parts[1]
-            
-            Write-Host "🔍 Testing connection to $testHost`:$testPort..."
-            $maxAttempts = [int]'${{ inputs.max-test-attempts }}'
-            $connected = $false
-            
-            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-              Write-Host "Connection test attempt $attempt of $maxAttempts..."
-              
-              $result = Test-NetConnection -ComputerName $testHost -Port $testPort -InformationLevel Quiet -WarningAction SilentlyContinue
-              if ($result) {
-                Write-Host "✅ VPN connection established successfully - target server is reachable"
-                $connected = $true
-                break
-              }
-              
-              if ($attempt -lt $maxAttempts) {
-                Start-Sleep -Seconds 5
-              }
-            }
-            
-            if (-not $connected) {
-              Write-Host "❌ ERROR: Failed to establish connection to $testHost`:$testPort after $maxAttempts attempts"
-              exit 1
-            }
-          } else {
-            Write-Host "⚠️ WARNING: Invalid test-connection format. Use 'host:port'"
-          }
         }
         
         Write-Host "🎉 OpenVPN connection setup complete"
