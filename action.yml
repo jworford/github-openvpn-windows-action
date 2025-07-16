@@ -157,9 +157,9 @@ runs:
           if (Test-Path $file) {
             try {
               Remove-Item $file -Force
-              Write-Host "Removed $file"
+              Write-Host "Removed ${file}"
             } catch {
-              Write-Host "Failed to remove $file: $($_.Exception.Message)"
+              Write-Host "Failed to remove ${file}: $($_.Exception.Message)"
             }
           }
         }
