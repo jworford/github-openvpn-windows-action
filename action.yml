@@ -64,8 +64,8 @@ runs:
         
         # Create auth file with username and password
         $auth = @"
-        ${{ secrets.OPENVPN_USERNAME_DEV }}
-        ${{ secrets.OPENVPN_PASSWORD_DEV }}
+        ${{ inputs.username }}
+        ${{ inputs.password }}
         "@
         $auth | Out-File -FilePath "auth.txt" -Encoding UTF8
 
