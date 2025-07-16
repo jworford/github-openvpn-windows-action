@@ -32,18 +32,17 @@ runs:
   using: 'composite'
   steps:
     - name: Setup OpenVPN Connection
-      shell: powershell
       run: |
         $ErrorActionPreference = "Stop"
         
         Write-Host "🔧 Setting up OpenVPN connection..."
         
         # Create OpenVPN config file from input
-        '${{ inputs.config }}' | Out-File -FilePath "client.ovpn" -Encoding UTF8
+        echo '${{ inputs.config }}' | Out-File -FilePath "client.ovpn" -Encoding UTF8
         Write-Host "✓ OpenVPN config file created"
         
         # Install OpenVPN using Chocolatey
-        Write-Host "📦 Installing OpenVPN using Chocolatey..."
+        Write-Host "Installing OpenVPN using Chocolatey..."
         $chocoResult = Start-Process choco -ArgumentList "install", "openvpn", "-y", "--no-progress" -Wait -PassThru -NoNewWindow
         Write-Host "Chocolatey installation exit code: $($chocoResult.ExitCode)"
         
@@ -87,3 +86,4 @@ runs:
         }
         
         Write-Host "🎉 OpenVPN connection setup complete"
+      shell: powershell
