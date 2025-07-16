@@ -61,10 +61,11 @@ runs:
         }
         
         # Create auth file with username and password
-        $username = '${{ inputs.username }}'
-        $password = '${{ inputs.password }}'
-        $authContent = "$username`n$password"
-        $authContent | Out-File -FilePath "auth.txt" -Encoding UTF8
+        $auth = @"
+        ${{ inputs.username }}
+        ${{ inputs.password }}
+        "@
+        $auth | Out-File -FilePath "auth.txt" -Encoding UTF8
         Write-Host "✓ Authentication file created"
         
         # Start OpenVPN connection
@@ -93,27 +94,24 @@ runs:
         
         # Test connection if specified
         $testConnection = '${{ inputs.test-connection }}'
-        if ($testConnection -and $testConnection -ne '') {
-          Write-Host "🔍 Testing connection to $testConnection..."
+        if ($testConnection) {
           $parts = $testConnection.Split(':')
           if ($parts.Length -eq 2) {
             $testHost = $parts[0]
             $testPort = [int]$parts[1]
+            
+            Write-Host "🔍 Testing connection to $testHost`:$testPort..."
             $maxAttempts = [int]'${{ inputs.max-test-attempts }}'
             $connected = $false
             
             for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
               Write-Host "Connection test attempt $attempt of $maxAttempts..."
               
-              try {
-                $result = Test-NetConnection -ComputerName $testHost -Port $testPort -InformationLevel Quiet -WarningAction SilentlyContinue
-                if ($result) {
-                  Write-Host "✅ VPN connection established successfully - target server is reachable"
-                  $connected = $true
-                  break
-                }
-              } catch {
-                Write-Host "⚠️ Connection test failed: $($_.Exception.Message)"
+              $result = Test-NetConnection -ComputerName $testHost -Port $testPort -InformationLevel Quiet -WarningAction SilentlyContinue
+              if ($result) {
+                Write-Host "✅ VPN connection established successfully - target server is reachable"
+                $connected = $true
+                break
               }
               
               if ($attempt -lt $maxAttempts) {
@@ -173,26 +171,22 @@ runs:
           Write-Host "⚠️ No stored process ID found, attempting to find OpenVPN processes..."
           
           # Fallback: Find and terminate any OpenVPN processes
-          try {
-            $openvpnProcesses = Get-Process -Name "openvpn" -ErrorAction SilentlyContinue
+          $openvpnProcesses = Get-Process -Name "openvpn" -ErrorAction SilentlyContinue
+          
+          if ($openvpnProcesses) {
+            Write-Host "🔍 Found $($openvpnProcesses.Count) OpenVPN process(es)"
             
-            if ($openvpnProcesses) {
-              Write-Host "🔍 Found $($openvpnProcesses.Count) OpenVPN process(es)"
-              
-              foreach ($proc in $openvpnProcesses) {
-                Write-Host "🛑 Terminating OpenVPN process (PID: $($proc.Id))..."
-                try {
-                  Stop-Process -Id $proc.Id -Force
-                  Write-Host "✅ Process $($proc.Id) terminated"
-                } catch {
-                  Write-Host "⚠️ Failed to terminate process $($proc.Id): $($_.Exception.Message)"
-                }
+            foreach ($proc in $openvpnProcesses) {
+              Write-Host "🛑 Terminating OpenVPN process (PID: $($proc.Id))..."
+              try {
+                Stop-Process -Id $proc.Id -Force
+                Write-Host "✅ Process $($proc.Id) terminated"
+              } catch {
+                Write-Host "⚠️ Failed to terminate process $($proc.Id): $($_.Exception.Message)"
               }
-            } else {
-              Write-Host "ℹ️ No OpenVPN processes found"
             }
-          } catch {
-            Write-Host "⚠️ Error finding OpenVPN processes: $($_.Exception.Message)"
+          } else {
+            Write-Host "ℹ️ No OpenVPN processes found"
           }
         }
         
