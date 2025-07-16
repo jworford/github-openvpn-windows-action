@@ -51,7 +51,7 @@ runs:
           exit 1
         }
         
-        Write-Host "✓ OpenVPN installed successfully"
+        Write-Host "OpenVPN installed successfully"
         
         # Verify OpenVPN installation
         $openvpnPath = "C:\Program Files\OpenVPN\bin\openvpn.exe"
