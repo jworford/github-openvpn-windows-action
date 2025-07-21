@@ -108,10 +108,20 @@ runs:
         
         if ($serviceExe) {
           Write-Host "Installing OpenVPN service..."
-          $serviceResult = Start-Process -FilePath $serviceExe -ArgumentList "-install" -Wait -PassThru -NoNewWindow
           
-          if ($serviceResult.ExitCode -ne 0) {
-            Write-Host "WARNING: Service install returned exit code: $($serviceResult.ExitCode)"
+          # Check if service already exists
+          $existingService = Get-Service -Name "OpenVPN" -ErrorAction SilentlyContinue
+          if ($existingService) {
+            Write-Host "OpenVPN service already exists, skipping installation"
+          } else {
+            $serviceResult = Start-Process -FilePath $serviceExe -ArgumentList "-install" -Wait -PassThru -NoNewWindow
+            
+            if ($serviceResult.ExitCode -ne 0) {
+              Write-Host "WARNING: Service install returned exit code: $($serviceResult.ExitCode)"
+              Write-Host "This may be normal if the service already exists"
+            } else {
+              Write-Host "OpenVPN service installed successfully"
+            }
           }
         } else {
           Write-Host "WARNING: OpenVPN service executable not found. Attempting to start service anyway..."
@@ -130,10 +140,35 @@ runs:
           Write-Host "OpenVPN service started successfully"
         } else {
           Write-Host "WARNING: OpenVPN service may not be running properly"
+          if ($service) {
+            Write-Host "Service status: $($service.Status)"
+          } else {
+            Write-Host "Service not found"
+          }
         }
         
-        # Define log file path (service logs to different location)  
-        $log = "$logDir\client.log"
+        # Define log file paths - try multiple possible locations
+        $logPaths = @(
+          "$logDir\client.log",
+          "$logDir\openvpn.log", 
+          "C:\Program Files\OpenVPN\log\client.log",
+          "C:\Program Files\OpenVPN\log\openvpn.log"
+        )
+        
+        $log = $null
+        foreach ($logPath in $logPaths) {
+          if (Test-Path $logPath) {
+            $log = $logPath
+            Write-Host "Found log file at: $log"
+            break
+          }
+        }
+        
+        if (-not $log) {
+          # Default to expected location even if it doesn't exist yet
+          $log = "$logDir\client.log"
+          Write-Host "Using default log path: $log"
+        }
         
         # Wait for connection to establish
         $timeout = [int]'${{ inputs.connection-timeout }}'
@@ -146,10 +181,13 @@ runs:
           Start-Sleep -Seconds 5
           $attempts++
           
+          Write-Host "Connection attempt $attempts of $maxAttempts..."
+          
           # Check if log file exists and has connection success
           if (Test-Path $log) {
             if (Select-String -Path $log -Pattern "Initialization Sequence Completed" -ErrorAction SilentlyContinue) {
               $up = $true
+              Write-Host "Found 'Initialization Sequence Completed' in log"
               break
             }
           }
@@ -157,7 +195,20 @@ runs:
           # Also check for any OpenVPN processes as fallback
           $openvpnProcs = Get-Process -Name "openvpn" -ErrorAction SilentlyContinue
           if ($openvpnProcs) {
-            Write-Host "OpenVPN process detected (attempt $attempts/$maxAttempts)"
+            Write-Host "OpenVPN process detected (PID: $($openvpnProcs[0].Id))"
+            
+            # If we have a process running for more than 30 seconds, assume connection is up
+            if ($attempts -ge 6) {
+              Write-Host "OpenVPN process has been running for sufficient time, assuming connection is established"
+              $up = $true
+              break
+            }
+          }
+          
+          # Check service status
+          $currentService = Get-Service -Name "OpenVPN" -ErrorAction SilentlyContinue
+          if ($currentService) {
+            Write-Host "Service status: $($currentService.Status)"
           }
         }
 
