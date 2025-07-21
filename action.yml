@@ -108,6 +108,14 @@ runs:
         }
 
         Write-Host "VPN is up"
+
+        Write-Host "=== ipconfig /all ==="
+          ipconfig /all
+
+        Write-Host "`n=== Get-NetIPInterface ==="
+          Get-NetIPInterface |
+            Format-Table InterfaceAlias, AddressFamily, ConnectionState, ifIndex, InterfaceMetric
+
         Write-Host "OpenVPN connection setup complete"
       shell: powershell
 
