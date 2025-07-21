@@ -32,35 +32,33 @@ runs:
   using: 'composite'
   steps:
     - name: Setup OpenVPN Connection
+      shell: powershell
       run: |
         $ErrorActionPreference = "Stop"
         
-        Write-Host "Setting up OpenVPN connection..."
+        Write-Host "🔧 Setting up OpenVPN connection..."
         
         # Create OpenVPN config file from input
-        echo '${{ inputs.config }}' | Out-File -FilePath "client.ovpn" -Encoding UTF8
-        Write-Host "OpenVPN config file created"
+        '${{ inputs.config }}' | Out-File -FilePath "client.ovpn" -Encoding UTF8
+        Write-Host "✓ OpenVPN config file created"
         
         # Install OpenVPN using Chocolatey
-        Write-Host "Installing OpenVPN using Chocolatey..."
+        Write-Host "📦 Installing OpenVPN using Chocolatey..."
         $chocoResult = Start-Process choco -ArgumentList "install", "openvpn", "-y", "--no-progress" -Wait -PassThru -NoNewWindow
-        Write-Host "Chocolatey installation exit code: $($chocoResult.ExitCode)"
         
         if ($chocoResult.ExitCode -ne 0) {
-          Write-Host "ERROR: Chocolatey installation failed"
+          Write-Host "❌ ERROR: Chocolatey installation failed"
           exit 1
         }
         
-        Write-Host "OpenVPN installed successfully"
+        Write-Host "✓ OpenVPN installed successfully"
         
         # Verify OpenVPN installation
         $openvpnPath = "C:\Program Files\OpenVPN\bin\openvpn.exe"
         if (-not (Test-Path $openvpnPath)) {
-          Write-Host "ERROR: OpenVPN executable not found at expected location"
+          Write-Host "❌ ERROR: OpenVPN executable not found at expected location"
           exit 1
         }
-        
-        Write-Host "Found OpenVPN at: $openvpnPath"
         
         # Create auth file with username and password
         $auth = @"
@@ -68,77 +66,156 @@ runs:
         ${{ inputs.password }}
         "@
         $auth | Out-File -FilePath "auth.txt" -Encoding UTF8
-
-        Write-Host "Authentication file created"
+        Write-Host "✓ Authentication file created"
         
-        # Start OpenVPN connection
-        Write-Host "Starting OpenVPN connection using: $openvpnPath"
-        $process = Start-Process -FilePath $openvpnPath -ArgumentList "--config", "client.ovpn", "--auth-user-pass", "auth.txt", "--log", "openvpn.log" -PassThru -NoNewWindow
+        # Setup OpenVPN service directories
+        $configDir = "C:\Program Files\OpenVPN\config"
+        $logDir = "C:\Program Files\OpenVPN\log"
         
-        # Define log file path
-        $log = "openvpn.log"
+        # Create directories if they don't exist
+        if (-not (Test-Path $configDir)) {
+          New-Item -ItemType Directory -Path $configDir -Force
+        }
+        if (-not (Test-Path $logDir)) {
+          New-Item -ItemType Directory -Path $logDir -Force
+        }
+        
+        # Copy config and auth files to OpenVPN config directory
+        Copy-Item "client.ovpn" -Destination "$configDir\client.ovpn" -Force
+        Copy-Item "auth.txt" -Destination "$configDir\auth.txt" -Force
+        
+        Write-Host "✓ Config files copied to OpenVPN directory"
+        
+        # Install and start OpenVPN service
+        Write-Host "🚀 Installing OpenVPN service..."
+        $serviceResult = Start-Process -FilePath "C:\Program Files\OpenVPN\bin\openvpnserv2.exe" -ArgumentList "-install" -Wait -PassThru -NoNewWindow
+        
+        if ($serviceResult.ExitCode -ne 0) {
+          Write-Host "⚠️ WARNING: Service install returned exit code: $($serviceResult.ExitCode)"
+        }
+        
+        # Start the OpenVPN service
+        Write-Host "� Starting OpenVPN service..."
+        Start-Service -Name "OpenVPN" -ErrorAction SilentlyContinue
+        
+        # Wait a moment for service to initialize
+        Start-Sleep -Seconds 10
+        
+        # Check service status
+        $service = Get-Service -Name "OpenVPN" -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -eq "Running") {
+          Write-Host "✓ OpenVPN service started successfully"
+        } else {
+          Write-Host "⚠️ WARNING: OpenVPN service may not be running properly"
+        }
+        
+        # Define log file path (service logs to different location)  
+        $log = "$logDir\client.log"
         
         # Wait for connection to establish
-        Start-Sleep -Seconds 15
-
-        # did it exit?
-        if ($process.HasExited) {
-          Write-Error "openvpn.exe exited with code $($process.ExitCode)"
-          if (Test-Path $log) {
-            Write-Host "=== Last lines of openvpn.log ==="
-            Get-Content $log -Tail 50
-          }
-          throw "VPN launch failed"
-        }
-
-        # wait for the “Initialization Sequence Completed” marker
-        Write-Host "Waiting for tunnel to come up…"
+        $timeout = [int]'${{ inputs.connection-timeout }}'
+        Write-Host "⏳ Waiting for VPN connection to establish..."
         $up = $false
-        1..9 | ForEach-Object {
+        $attempts = 0
+        $maxAttempts = [int]'${{ inputs.max-test-attempts }}'
+        
+        while ($attempts -lt $maxAttempts -and -not $up) {
           Start-Sleep -Seconds 5
-          if (Select-String -Path $log -Pattern "Initialization Sequence Completed") {
-            $up = $true; return
+          $attempts++
+          
+          # Check if log file exists and has connection success
+          if (Test-Path $log) {
+            if (Select-String -Path $log -Pattern "Initialization Sequence Completed" -ErrorAction SilentlyContinue) {
+              $up = $true
+              break
+            }
+          }
+          
+          # Also check for any OpenVPN processes as fallback
+          $openvpnProcs = Get-Process -Name "openvpn" -ErrorAction SilentlyContinue
+          if ($openvpnProcs) {
+            Write-Host "📋 OpenVPN process detected (attempt $attempts/$maxAttempts)"
           }
         }
 
         if (-not $up) {
-          Write-Error "Tunnel never initialized. Dumping openvpn.log:"
-          Get-Content $log -Tail 50
-          throw "VPN connection failed"
+          Write-Host "❌ ERROR: Tunnel never initialized after $maxAttempts attempts. Checking logs..."
+          if (Test-Path $log) {
+            Write-Host "=== Last lines of $log ==="
+            Get-Content $log -Tail 50 -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "⚠️ Log file not found at: $log"
+          }
+          
+          # Check service status
+          $service = Get-Service -Name "OpenVPN" -ErrorAction SilentlyContinue
+          if ($service) {
+            Write-Host "OpenVPN service status: $($service.Status)"
+          }
+          
+          exit 1
         }
-
-        Write-Host "VPN is up"
-
-        Write-Host "=== ipconfig /all ==="
-          ipconfig /all
-
-        Write-Host "`n=== Get-NetIPInterface ==="
-          Get-NetIPInterface |
-            Format-Table InterfaceAlias, AddressFamily, ConnectionState, ifIndex, InterfaceMetric
-
-        Write-Host "OpenVPN connection setup complete"
-      shell: powershell
-
+        
+        Write-Host "✅ VPN connection established successfully"
+        
+        # Test connection if specified
+        $testConnection = '${{ inputs.test-connection }}'
+        if ($testConnection) {
+          $parts = $testConnection.Split(':')
+          if ($parts.Length -eq 2) {
+            $testHost = $parts[0]
+            $testPort = [int]$parts[1]
+            
+            Write-Host "🔍 Testing connection to $testHost`:$testPort..."
+            $maxAttempts = [int]'${{ inputs.max-test-attempts }}'
+            $connected = $false
+            
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+              Write-Host "Connection test attempt $attempt of $maxAttempts..."
+              
+              $result = Test-NetConnection -ComputerName $testHost -Port $testPort -InformationLevel Quiet -WarningAction SilentlyContinue
+              if ($result) {
+                Write-Host "✅ VPN connection established successfully - target server is reachable"
+                $connected = $true
+                break
+              }
+              
+              if ($attempt -lt $maxAttempts) {
+                Start-Sleep -Seconds 5
+              }
+            }
+            
+            if (-not $connected) {
+              Write-Host "❌ ERROR: Failed to establish connection to $testHost`:$testPort after $maxAttempts attempts"
+              exit 1
+            }
+          } else {
+            Write-Host "⚠️ WARNING: Invalid test-connection format. Use 'host:port'"
+          }
+        }
+        
+        Write-Host "🎉 OpenVPN connection setup complete"
+        
     - name: Cleanup OpenVPN (Always runs)
       shell: powershell
       if: always()
       run: |
         $ErrorActionPreference = "Continue"
         
-        Write-Host "Starting OpenVPN cleanup..."
+        Write-Host "🧹 Starting OpenVPN cleanup..."
         
         # Try to get process ID from environment
         $processId = $env:OPENVPN_PROCESS_ID
         
         if ($processId) {
-          Write-Host "Found stored OpenVPN process ID: $processId"
+          Write-Host "🔍 Found stored OpenVPN process ID: $processId"
           
           try {
             # Check if process is still running
             $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
             
             if ($process) {
-              Write-Host "Terminating OpenVPN process (PID: $processId)..."
+              Write-Host "🛑 Terminating OpenVPN process (PID: $processId)..."
               Stop-Process -Id $processId -Force
               
               # Wait a moment and verify termination
@@ -146,52 +223,52 @@ runs:
               $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
               
               if (-not $process) {
-                Write-Host "OpenVPN process terminated successfully"
+                Write-Host "✅ OpenVPN process terminated successfully"
               } else {
-                Write-Host "OpenVPN process may still be running"
+                Write-Host "⚠️ OpenVPN process may still be running"
               }
             } else {
-              Write-Host "OpenVPN process already terminated"
+              Write-Host "ℹ️ OpenVPN process already terminated"
             }
           } catch {
-            Write-Host "Error during process termination: $($_.Exception.Message)"
+            Write-Host "⚠️ Error during process termination: $($_.Exception.Message)"
           }
         } else {
-          Write-Host "No stored process ID found, attempting to find OpenVPN processes..."
+          Write-Host "⚠️ No stored process ID found, attempting to find OpenVPN processes..."
           
           # Fallback: Find and terminate any OpenVPN processes
           $openvpnProcesses = Get-Process -Name "openvpn" -ErrorAction SilentlyContinue
           
           if ($openvpnProcesses) {
-            Write-Host "Found $($openvpnProcesses.Count) OpenVPN process(es)"
+            Write-Host "🔍 Found $($openvpnProcesses.Count) OpenVPN process(es)"
             
             foreach ($proc in $openvpnProcesses) {
-              Write-Host "Terminating OpenVPN process (PID: $($proc.Id))..."
+              Write-Host "🛑 Terminating OpenVPN process (PID: $($proc.Id))..."
               try {
                 Stop-Process -Id $proc.Id -Force
-                Write-Host "Process $($proc.Id) terminated"
+                Write-Host "✅ Process $($proc.Id) terminated"
               } catch {
-                Write-Host "Failed to terminate process $($proc.Id): $($_.Exception.Message)"
+                Write-Host "⚠️ Failed to terminate process $($proc.Id): $($_.Exception.Message)"
               }
             }
           } else {
-            Write-Host "No OpenVPN processes found"
+            Write-Host "ℹ️ No OpenVPN processes found"
           }
         }
         
         # Clean up temporary files
-        Write-Host "Cleaning up temporary files..."
+        Write-Host "🗑️ Cleaning up temporary files..."
         
         $filesToClean = @("client.ovpn", "auth.txt", "openvpn.log")
         foreach ($file in $filesToClean) {
           if (Test-Path $file) {
             try {
               Remove-Item $file -Force
-              Write-Host "Removed ${file}"
+              Write-Host "✅ Removed $file"
             } catch {
-              Write-Host "Failed to remove ${file}: $($_.Exception.Message)"
+              Write-Host "⚠️ Failed to remove $file`: $($_.Exception.Message)"
             }
           }
         }
         
-        Write-Host "OpenVPN cleanup complete"
+        Write-Host "🎉 OpenVPN cleanup complete"
