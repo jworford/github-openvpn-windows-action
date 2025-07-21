@@ -87,11 +87,34 @@ runs:
         Write-Host "Config files copied to OpenVPN directory"
         
         # Install and start OpenVPN service
-        Write-Host "Installing OpenVPN service..."
-        $serviceResult = Start-Process -FilePath "C:\Program Files\OpenVPN\bin\openvpnserv2.exe" -ArgumentList "-install" -Wait -PassThru -NoNewWindow
+        Write-Host "Setting up OpenVPN service..."
         
-        if ($serviceResult.ExitCode -ne 0) {
-          Write-Host "WARNING: Service install returned exit code: $($serviceResult.ExitCode)"
+        # Check for OpenVPN service executable
+        $serviceExePaths = @(
+          "C:\Program Files\OpenVPN\bin\openvpnserv2.exe",
+          "C:\Program Files\OpenVPN\bin\openvpnserv.exe",
+          "C:\Program Files (x86)\OpenVPN\bin\openvpnserv2.exe",
+          "C:\Program Files (x86)\OpenVPN\bin\openvpnserv.exe"
+        )
+        
+        $serviceExe = $null
+        foreach ($path in $serviceExePaths) {
+          if (Test-Path $path) {
+            $serviceExe = $path
+            Write-Host "Found OpenVPN service executable: $serviceExe"
+            break
+          }
+        }
+        
+        if ($serviceExe) {
+          Write-Host "Installing OpenVPN service..."
+          $serviceResult = Start-Process -FilePath $serviceExe -ArgumentList "-install" -Wait -PassThru -NoNewWindow
+          
+          if ($serviceResult.ExitCode -ne 0) {
+            Write-Host "WARNING: Service install returned exit code: $($serviceResult.ExitCode)"
+          }
+        } else {
+          Write-Host "WARNING: OpenVPN service executable not found. Attempting to start service anyway..."
         }
         
         # Start the OpenVPN service
