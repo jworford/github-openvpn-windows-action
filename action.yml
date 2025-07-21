@@ -95,7 +95,7 @@ runs:
         }
         
         # Start the OpenVPN service
-        Write-Host "� Starting OpenVPN service..."
+        Write-Host "Starting OpenVPN service..."
         Start-Service -Name "OpenVPN" -ErrorAction SilentlyContinue
         
         # Wait a moment for service to initialize
