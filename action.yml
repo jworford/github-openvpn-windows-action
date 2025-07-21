@@ -73,19 +73,38 @@ runs:
         
         # Start OpenVPN connection
         Write-Host "Starting OpenVPN connection using: $openvpnPath"
-        $process = Start-Process -FilePath $openvpnPath -ArgumentList "--config", "client.ovpn", "--auth-user-pass", "auth.txt", "--log", "openvpn.log", "--daemon" -PassThru -NoNewWindow
+        $process = Start-Process -FilePath $openvpnPath -ArgumentList "--config", "client.ovpn", "--auth-user-pass", "auth.txt", "--log", "openvpn.log" -PassThru -NoNewWindow
         
         # Wait for connection to establish
-        Start-Sleep -Seconds 45
-        
-        # Check if process is still running
-        if ($process -and !$process.HasExited) {
-          Write-Host "OpenVPN process is running"
-        } else {
-          Write-Host "ERROR: OpenVPN process failed to start or exited unexpectedly"
-          exit 1
+        Start-Sleep -Seconds 15
+
+        # did it exit?
+        if ($process.HasExited) {
+          Write-Error "openvpn.exe exited with code $($process.ExitCode)"
+          if (Test-Path $log) {
+            Write-Host "=== Last lines of openvpn.log ==="
+            Get-Content $log -Tail 50
+          }
+          throw "VPN launch failed"
         }
-        
+
+        # wait for the “Initialization Sequence Completed” marker
+        Write-Host "Waiting for tunnel to come up…"
+        $up = $false
+        1..9 | ForEach-Object {
+          Start-Sleep -Seconds 5
+          if (Select-String -Path $log -Pattern "Initialization Sequence Completed") {
+            $up = $true; return
+          }
+        }
+
+        if (-not $up) {
+          Write-Error "Tunnel never initialized. Dumping openvpn.log:"
+          Get-Content $log -Tail 50
+          throw "VPN connection failed"
+        }
+
+        Write-Host "VPN is up"
         Write-Host "OpenVPN connection setup complete"
       shell: powershell
 
