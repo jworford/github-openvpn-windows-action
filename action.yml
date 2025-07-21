@@ -75,6 +75,9 @@ runs:
         Write-Host "Starting OpenVPN connection using: $openvpnPath"
         $process = Start-Process -FilePath $openvpnPath -ArgumentList "--config", "client.ovpn", "--auth-user-pass", "auth.txt", "--log", "openvpn.log" -PassThru -NoNewWindow
         
+        # Define log file path
+        $log = "openvpn.log"
+        
         # Wait for connection to establish
         Start-Sleep -Seconds 15
 
